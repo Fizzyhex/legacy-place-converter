@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:Roblox_Legacy_Place_Convertor"
         mc:Ignorable="d"
-        Title="Roblox Legacy Place Converter" Height="228" Width="890" Icon="Assets/converterLogo.ico" MinWidth="890" MinHeight="228">
+        Title="Roblox Legacy Place Converter" Height="320" Width="890" Icon="Assets/converterLogo.ico" MinWidth="890" MinHeight="320">
     <Window.Background>
         <LinearGradientBrush EndPoint="0.5,1" StartPoint="0.5,0">
             <GradientStop Color="#FF0F2630" Offset="0"/>
@@ -14,13 +14,20 @@
     </Window.Background>
     <Grid>
         <Label Content="Converts new places in a way that old clients can open them" Margin="10,10,0,0" VerticalAlignment="Top" FontSize="16" Height="35" HorizontalAlignment="Left" Width="440" Foreground="White"/>
-        <Label x:Name="PlaceSelectedLabel" Content="File selected: None" HorizontalAlignment="Left" Margin="10,45,0,0" VerticalAlignment="Top" Foreground="White"/>
-        <Button x:Name="BrowseButton" Content="Browse" HorizontalAlignment="Left" Margin="15,71,0,0" VerticalAlignment="Top" Width="75" Height="24" Click="BrowseButton_Click"/>
-        <Button x:Name="ConvertButton" Content="CONVERT" HorizontalAlignment="Left" Margin="15,104,0,0" VerticalAlignment="Top" Width="125" Height="31" Click="ConvertButton_Click" FontWeight="Bold"/>
-        <ProgressBar x:Name="ProgressBar" Height="15" Margin="150,104,0,0" VerticalAlignment="Top" Value="0" HorizontalAlignment="Left" Width="290"/>
-        <Label x:Name="ProgressLabel" Content="" HorizontalAlignment="Left" Margin="145,117,0,0" VerticalAlignment="Top" Height="28" Background="{x:Null}" Foreground="White"/>
-        <Label Content="Made by BakonBot" HorizontalContentAlignment="Left" HorizontalAlignment="Left" Margin="11,145,0,0" VerticalAlignment="Top" Foreground="White"/>
-        <TextBlock HorizontalAlignment="Left" VerticalAlignment="Top" Margin="121,150,0,0">           
+        <Label Content="Mode:" HorizontalAlignment="Left" Margin="10,45,0,0" VerticalAlignment="Top" Foreground="White"/>
+        <RadioButton x:Name="SingleFileRadioButton" Content="Single file" HorizontalAlignment="Left" Margin="60,45,0,0" VerticalAlignment="Top" Foreground="White" IsChecked="True" Checked="ModeRadioButton_Checked"/>
+        <RadioButton x:Name="BatchFolderRadioButton" Content="Folder batch" HorizontalAlignment="Left" Margin="150,45,0,0" VerticalAlignment="Top" Foreground="White" Checked="ModeRadioButton_Checked"/>
+        <Label x:Name="PlaceSelectedLabel" Content="File selected: None" HorizontalAlignment="Left" Margin="10,70,0,0" VerticalAlignment="Top" Foreground="White"/>
+        <Button x:Name="BrowseButton" Content="Browse" HorizontalAlignment="Left" Margin="15,96,0,0" VerticalAlignment="Top" Width="75" Height="24" Click="BrowseButton_Click"/>
+        <Label x:Name="InputFolderLabel" Content="Input folder: None" HorizontalAlignment="Left" Margin="10,125,0,0" VerticalAlignment="Top" Foreground="White"/>
+        <Button x:Name="BrowseFolderButton" Content="Browse Folder" HorizontalAlignment="Left" Margin="15,151,0,0" VerticalAlignment="Top" Width="100" Height="24" Click="BrowseFolderButton_Click"/>
+        <Label x:Name="OutputFolderLabel" Content="Output folder: None" HorizontalAlignment="Left" Margin="10,179,0,0" VerticalAlignment="Top" Foreground="White"/>
+        <Button x:Name="BrowseOutputFolderButton" Content="Output Folder" HorizontalAlignment="Left" Margin="15,205,0,0" VerticalAlignment="Top" Width="100" Height="24" Click="BrowseOutputFolderButton_Click"/>
+        <Button x:Name="ConvertButton" Content="CONVERT" HorizontalAlignment="Left" Margin="15,238,0,0" VerticalAlignment="Top" Width="125" Height="31" Click="ConvertButton_Click" FontWeight="Bold"/>
+        <ProgressBar x:Name="ProgressBar" Height="15" Margin="150,238,0,0" VerticalAlignment="Top" Value="0" HorizontalAlignment="Left" Width="290"/>
+        <Label x:Name="ProgressLabel" Content="" HorizontalAlignment="Left" Margin="145,251,0,0" VerticalAlignment="Top" Height="28" Background="{x:Null}" Foreground="White"/>
+        <Label Content="Made by BakonBot" HorizontalContentAlignment="Left" HorizontalAlignment="Left" Margin="11,272,0,0" VerticalAlignment="Top" Foreground="White"/>
+        <TextBlock HorizontalAlignment="Left" VerticalAlignment="Top" Margin="121,277,0,0">           
             <Hyperlink x:Name="GithubHyperlink" NavigateUri="https://github.com/BakonBot/legacy-place-converter" RequestNavigate="GithubHyperlink_RequestNavigate" Foreground="#FF48A3FF">
                 Github
             </Hyperlink>
