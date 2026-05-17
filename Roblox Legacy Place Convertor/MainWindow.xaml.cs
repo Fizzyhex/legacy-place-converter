@@ -465,6 +465,11 @@ namespace Roblox_Legacy_Place_Convertor
 
         private void UpdateModeUi()
         {
+            if (BrowseButton == null || PlaceSelectedLabel == null || BrowseFolderButton == null || BrowseOutputFolderButton == null || InputFolderLabel == null || OutputFolderLabel == null || ConvertButton == null || SingleFileRadioButton == null || BatchFolderRadioButton == null)
+            {
+                return;
+            }
+
             bool isSingleFile = conversionMode == ConversionMode.SingleFile;
             BrowseButton.IsEnabled = isSingleFile && !isConverting;
             PlaceSelectedLabel.IsEnabled = isSingleFile;
