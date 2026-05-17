@@ -324,8 +324,8 @@ namespace Roblox_Legacy_Place_Convertor
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Batch conversion failed: " + ex.Message, "Conversion failed", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
+                summary.Failed++;
+                summary.Errors.Add("Batch error: " + ex.Message);
             }
             finally
             {
@@ -365,31 +365,28 @@ namespace Roblox_Legacy_Place_Convertor
 
             foreach (string file in files)
             {
-                string relativePath = GetRelativePath(inputRoot, file);
-                string outputExtension = GetOutputExtension(file);
-                if (string.IsNullOrWhiteSpace(outputExtension))
-                {
-                    summary.Skipped++;
-                    processed++;
-                    progress.Report(new BatchProgress { Processed = processed, Total = summary.TotalDiscovered, CurrentFile = relativePath, IsCompleted = true });
-                    continue;
-                }
-
-                string outputRelativePath = Path.ChangeExtension(relativePath, outputExtension);
-                string outputPath = Path.Combine(outputRoot, outputRelativePath);
-                progress.Report(new BatchProgress { Processed = processed, Total = summary.TotalDiscovered, CurrentFile = relativePath, IsCompleted = false });
-
-                if (!outputPaths.Add(outputPath))
-                {
-                    summary.Skipped++;
-                    summary.Errors.Add("Output path collision for " + relativePath);
-                    processed++;
-                    progress.Report(new BatchProgress { Processed = processed, Total = summary.TotalDiscovered, CurrentFile = relativePath, IsCompleted = true });
-                    continue;
-                }
-
+                string relativePath = null;
                 try
                 {
+                    relativePath = GetRelativePath(inputRoot, file);
+                    string outputExtension = GetOutputExtension(file);
+                    if (string.IsNullOrWhiteSpace(outputExtension))
+                    {
+                        summary.Skipped++;
+                        continue;
+                    }
+
+                    string outputRelativePath = Path.ChangeExtension(relativePath, outputExtension);
+                    string outputPath = Path.Combine(outputRoot, outputRelativePath);
+                    progress.Report(new BatchProgress { Processed = processed, Total = summary.TotalDiscovered, CurrentFile = relativePath, IsCompleted = false });
+
+                    if (!outputPaths.Add(outputPath))
+                    {
+                        summary.Skipped++;
+                        summary.Errors.Add("Output path collision for " + relativePath);
+                        continue;
+                    }
+
                     string outputDirectory = Path.GetDirectoryName(outputPath);
                     if (!string.IsNullOrWhiteSpace(outputDirectory))
                     {
@@ -410,11 +407,15 @@ namespace Roblox_Legacy_Place_Convertor
                 catch (Exception ex)
                 {
                     summary.Failed++;
-                    summary.Errors.Add(relativePath + ": " + ex.Message);
+                    string errorPath = relativePath ?? file;
+                    summary.Errors.Add(errorPath + ": " + ex.Message);
                 }
-
-                processed++;
-                progress.Report(new BatchProgress { Processed = processed, Total = summary.TotalDiscovered, CurrentFile = relativePath, IsCompleted = true });
+                finally
+                {
+                    processed++;
+                    string displayPath = relativePath ?? file;
+                    progress.Report(new BatchProgress { Processed = processed, Total = summary.TotalDiscovered, CurrentFile = displayPath, IsCompleted = true });
+                }
             }
         }
 
