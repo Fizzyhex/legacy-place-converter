@@ -16,6 +16,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
+using Forms = System.Windows.Forms;
 
 namespace Roblox_Legacy_Place_Convertor
 {
@@ -26,7 +27,24 @@ namespace Roblox_Legacy_Place_Convertor
     {
         private string fileToConvertPath;
         private string newFilePath;
+        private string inputFolderPath;
+        private string outputFolderPath;
         private bool isConverting;
+        private ConversionMode conversionMode = ConversionMode.SingleFile;
+        private static readonly HashSet<string> supportedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".rbxlx",
+            ".rbxmx",
+            ".rbxl",
+            ".rbxm"
+        };
+        private static readonly Dictionary<string, string> outputExtensionByInput = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { ".rbxlx", ".rbxl" },
+            { ".rbxl", ".rbxl" },
+            { ".rbxmx", ".rbxm" },
+            { ".rbxm", ".rbxm" }
+        };
         private static readonly Dictionary<string, string> color3uint8ToBrickColor = new Dictionary<string, string> // Yes, i wrote this all manually. Took me about 2 hours.
         {
             {"4294112243", "1"},
@@ -93,9 +111,42 @@ namespace Roblox_Legacy_Place_Convertor
             {"4280844103", "28"},
             {"4280763949", "141"}
         };
+        private enum ConversionMode
+        {
+            SingleFile,
+            BatchFolder
+        }
+
+        private sealed class ConversionOptions
+        {
+            public bool IncludeColors { get; set; }
+            public bool IncludeUnionData { get; set; }
+            public bool ConvertScripts { get; set; }
+            public bool ConvertFolders { get; set; }
+            public bool ChangeRbxassetid { get; set; }
+            public bool ConvertTextSize { get; set; }
+        }
+
+        private sealed class BatchProgress
+        {
+            public int Processed { get; set; }
+            public int Total { get; set; }
+            public string CurrentFile { get; set; }
+            public bool IsCompleted { get; set; }
+        }
+
+        private sealed class BatchSummary
+        {
+            public int TotalDiscovered { get; set; }
+            public int Converted { get; set; }
+            public int Skipped { get; set; }
+            public int Failed { get; set; }
+            public List<string> Errors { get; } = new List<string>();
+        }
         public MainWindow()
         {
             InitializeComponent();
+            UpdateModeUi();
         }
 
         private void GithubHyperlink_RequestNavigate(object sender, RequestNavigateEventArgs e)
@@ -121,50 +172,368 @@ namespace Roblox_Legacy_Place_Convertor
             }
         }
 
-        private void ConvertButton_Click(object sender, RoutedEventArgs e)
+        private void BrowseFolderButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (isConverting == true)
+            {
+                return;
+            }
+
+            using (var folderDialog = new Forms.FolderBrowserDialog())
+            {
+                folderDialog.Description = "Select the input folder";
+                folderDialog.SelectedPath = inputFolderPath ?? string.Empty;
+                if (folderDialog.ShowDialog() == Forms.DialogResult.OK)
+                {
+                    inputFolderPath = folderDialog.SelectedPath;
+                    InputFolderLabel.Content = "Input folder: " + inputFolderPath;
+                }
+            }
+        }
+
+        private void BrowseOutputFolderButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (isConverting == true)
+            {
+                return;
+            }
+
+            using (var folderDialog = new Forms.FolderBrowserDialog())
+            {
+                folderDialog.Description = "Select the output folder";
+                folderDialog.SelectedPath = outputFolderPath ?? string.Empty;
+                if (folderDialog.ShowDialog() == Forms.DialogResult.OK)
+                {
+                    outputFolderPath = folderDialog.SelectedPath;
+                    OutputFolderLabel.Content = "Output folder: " + outputFolderPath;
+                }
+            }
+        }
+
+        private void ModeRadioButton_Checked(object sender, RoutedEventArgs e)
+        {
+            conversionMode = SingleFileRadioButton.IsChecked == true ? ConversionMode.SingleFile : ConversionMode.BatchFolder;
+            UpdateModeUi();
+        }
+
+        private async void ConvertButton_Click(object sender, RoutedEventArgs e)
         {
             if (isConverting == true) // If you somehow managed to click the Convert button twice
             {
                 return;
             }
+
+            if (conversionMode == ConversionMode.SingleFile)
+            {
+                ConvertSingleFile();
+                return;
+            }
+
+            await ConvertBatchAsync();
+        }
+
+        private void ConvertSingleFile()
+        {
             if (string.IsNullOrWhiteSpace(fileToConvertPath)) // When you haven't selected a place file
             {
                 MessageBox.Show("Please select a model or place you'd like to convert by clicking on 'Browse'", "Cannot convert place", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
 
-            string[] file = File.ReadAllLines(fileToConvertPath);
-
-            foreach (var line in file)
+            string fileContents;
+            string readError;
+            if (!TryReadInputFile(fileToConvertPath, out fileContents, out readError))
             {
-                if (line.Contains("<roblox!"))
-                {
-                    MessageBox.Show("Please select a model or place in Roblox XML format.", "Cannot convert place", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return;
-                }
+                MessageBox.Show(readError, "Cannot convert place", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
             }
 
-            isConverting = true;
-            ConvertButton.IsEnabled = false;
-            ProgressBar.Value = 0;
-            ProgressLabel.Content = "";
-
-            // Ask user where to save the copy of the file
             SaveFileDialog fileDialog = new SaveFileDialog();
             fileDialog.Filter = "Roblox XML Place Files (*.rbxl)|*.rbxl|Roblox XML Model Files (*.rbxm)|*.rbxm";
             if (fileDialog.ShowDialog() != true)
             {
-                isConverting = false;
-                ConvertButton.IsEnabled = true;
                 return;
             }
+
             newFilePath = fileDialog.FileName;
-            File.Copy(fileToConvertPath, newFilePath, true);
-            // Read file contents
-            string fileContents = File.ReadAllText(newFilePath);
+            ProgressBar.Value = 0;
+            ProgressLabel.Content = "";
+            SetConvertingState(true);
 
-            // Search for terrain in place file, necessary for place to even open on old Roblox versions. When it finds its start and end, it removes the terrain part completely.
+            bool converted;
+            string writeError;
+            try
+            {
+                converted = TryWriteConvertedFile(fileContents, newFilePath, GetConversionOptions(), out writeError);
+            }
+            finally
+            {
+                SetConvertingState(false);
+            }
 
+            if (!converted)
+            {
+                MessageBox.Show(writeError, "Cannot convert place", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            ProgressBar.Value = 100;
+            ProgressLabel.Content = "Done!";
+            MessageBox.Show("Conversion done!", "Conversion status", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private async Task ConvertBatchAsync()
+        {
+            if (string.IsNullOrWhiteSpace(inputFolderPath) || string.IsNullOrWhiteSpace(outputFolderPath))
+            {
+                MessageBox.Show("Please select both an input folder and an output folder.", "Cannot convert folder", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            if (!Directory.Exists(inputFolderPath))
+            {
+                MessageBox.Show("Input folder does not exist.", "Cannot convert folder", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            if (IsSubdirectory(inputFolderPath, outputFolderPath))
+            {
+                MessageBox.Show("Output folder cannot be inside the input folder.", "Cannot convert folder", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            List<string> files = DiscoverSupportedFiles(inputFolderPath);
+            if (files.Count == 0)
+            {
+                MessageBox.Show("No supported Roblox files were found in the selected folder.", "Nothing to convert", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            Directory.CreateDirectory(outputFolderPath);
+
+            ProgressBar.Value = 0;
+            ProgressLabel.Content = "";
+            SetConvertingState(true);
+
+            var summary = new BatchSummary { TotalDiscovered = files.Count };
+            var progress = new Progress<BatchProgress>(UpdateBatchProgress);
+            var options = GetConversionOptions();
+
+            try
+            {
+                await Task.Run(() => ConvertBatchFiles(files, inputFolderPath, outputFolderPath, options, summary, progress));
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Batch conversion failed: " + ex.Message, "Conversion failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+            finally
+            {
+                SetConvertingState(false);
+            }
+
+            ProgressBar.Value = 100;
+            ProgressLabel.Content = "Done!";
+            ShowBatchSummary(summary);
+        }
+
+        private void UpdateBatchProgress(BatchProgress progress)
+        {
+            if (progress == null || progress.Total == 0)
+            {
+                ProgressBar.Value = 0;
+                return;
+            }
+
+            double percent = (double)progress.Processed / progress.Total * 100;
+            ProgressBar.Value = percent;
+
+            if (progress.IsCompleted)
+            {
+                ProgressLabel.Content = "Converted " + progress.Processed + "/" + progress.Total + ": " + progress.CurrentFile;
+            }
+            else
+            {
+                ProgressLabel.Content = "Converting " + (progress.Processed + 1) + "/" + progress.Total + ": " + progress.CurrentFile;
+            }
+        }
+
+        private void ConvertBatchFiles(List<string> files, string inputRoot, string outputRoot, ConversionOptions options, BatchSummary summary, IProgress<BatchProgress> progress)
+        {
+            var outputPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int processed = 0;
+
+            foreach (string file in files)
+            {
+                string relativePath = GetRelativePath(inputRoot, file);
+                string outputExtension = GetOutputExtension(file);
+                if (string.IsNullOrWhiteSpace(outputExtension))
+                {
+                    summary.Skipped++;
+                    processed++;
+                    progress.Report(new BatchProgress { Processed = processed, Total = summary.TotalDiscovered, CurrentFile = relativePath, IsCompleted = true });
+                    continue;
+                }
+
+                string outputRelativePath = Path.ChangeExtension(relativePath, outputExtension);
+                string outputPath = Path.Combine(outputRoot, outputRelativePath);
+                progress.Report(new BatchProgress { Processed = processed, Total = summary.TotalDiscovered, CurrentFile = relativePath, IsCompleted = false });
+
+                if (!outputPaths.Add(outputPath))
+                {
+                    summary.Skipped++;
+                    summary.Errors.Add("Output path collision for " + relativePath);
+                    processed++;
+                    progress.Report(new BatchProgress { Processed = processed, Total = summary.TotalDiscovered, CurrentFile = relativePath, IsCompleted = true });
+                    continue;
+                }
+
+                try
+                {
+                    string outputDirectory = Path.GetDirectoryName(outputPath);
+                    if (!string.IsNullOrWhiteSpace(outputDirectory))
+                    {
+                        Directory.CreateDirectory(outputDirectory);
+                    }
+
+                    string errorMessage;
+                    if (TryConvertFile(file, outputPath, options, out errorMessage))
+                    {
+                        summary.Converted++;
+                    }
+                    else
+                    {
+                        summary.Failed++;
+                        summary.Errors.Add(relativePath + ": " + errorMessage);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    summary.Failed++;
+                    summary.Errors.Add(relativePath + ": " + ex.Message);
+                }
+
+                processed++;
+                progress.Report(new BatchProgress { Processed = processed, Total = summary.TotalDiscovered, CurrentFile = relativePath, IsCompleted = true });
+            }
+        }
+
+        private void ShowBatchSummary(BatchSummary summary)
+        {
+            var messageBuilder = new StringBuilder();
+            messageBuilder.AppendLine("Batch conversion complete.");
+            messageBuilder.AppendLine("Total discovered: " + summary.TotalDiscovered);
+            messageBuilder.AppendLine("Converted: " + summary.Converted);
+            messageBuilder.AppendLine("Skipped: " + summary.Skipped);
+            messageBuilder.AppendLine("Failed: " + summary.Failed);
+
+            if (summary.Errors.Count > 0)
+            {
+                messageBuilder.AppendLine();
+                messageBuilder.AppendLine("Errors:");
+                foreach (string error in summary.Errors.Take(5))
+                {
+                    messageBuilder.AppendLine("- " + error);
+                }
+                if (summary.Errors.Count > 5)
+                {
+                    messageBuilder.AppendLine("...and " + (summary.Errors.Count - 5) + " more.");
+                }
+            }
+
+            MessageBox.Show(messageBuilder.ToString(), "Conversion summary", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private ConversionOptions GetConversionOptions()
+        {
+            return new ConversionOptions
+            {
+                IncludeColors = ColorCheckbox.IsChecked == true,
+                IncludeUnionData = UnionCheckbox.IsChecked == true,
+                ConvertScripts = ScriptConvertCheckbox.IsChecked == true,
+                ConvertFolders = ConvertFoldersCheckbox.IsChecked == true,
+                ChangeRbxassetid = ChangeRbxassetidCheckbox.IsChecked == true,
+                ConvertTextSize = ChangeTextSizeToFontSizeCheckbox.IsChecked == true
+            };
+        }
+
+        private void SetConvertingState(bool converting)
+        {
+            isConverting = converting;
+            UpdateModeUi();
+        }
+
+        private void UpdateModeUi()
+        {
+            if (BrowseButton == null || PlaceSelectedLabel == null || BrowseFolderButton == null || BrowseOutputFolderButton == null || InputFolderLabel == null || OutputFolderLabel == null || ConvertButton == null || SingleFileRadioButton == null || BatchFolderRadioButton == null)
+            {
+                return;
+            }
+
+            bool isSingleFile = conversionMode == ConversionMode.SingleFile;
+            BrowseButton.IsEnabled = isSingleFile && !isConverting;
+            PlaceSelectedLabel.IsEnabled = isSingleFile;
+            BrowseFolderButton.IsEnabled = !isSingleFile && !isConverting;
+            BrowseOutputFolderButton.IsEnabled = !isSingleFile && !isConverting;
+            InputFolderLabel.IsEnabled = !isSingleFile;
+            OutputFolderLabel.IsEnabled = !isSingleFile;
+            ConvertButton.IsEnabled = !isConverting;
+            SingleFileRadioButton.IsEnabled = !isConverting;
+            BatchFolderRadioButton.IsEnabled = !isConverting;
+        }
+
+        private bool TryReadInputFile(string inputPath, out string fileContents, out string errorMessage)
+        {
+            try
+            {
+                fileContents = File.ReadAllText(inputPath);
+            }
+            catch (Exception ex)
+            {
+                fileContents = null;
+                errorMessage = "Failed to read file: " + ex.Message;
+                return false;
+            }
+
+            if (fileContents.IndexOf("<roblox!", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                errorMessage = "Please select a model or place in Roblox XML format.";
+                return false;
+            }
+
+            errorMessage = null;
+            return true;
+        }
+
+        private bool TryWriteConvertedFile(string fileContents, string outputPath, ConversionOptions options, out string errorMessage)
+        {
+            try
+            {
+                string convertedContents = ConvertContents(fileContents, options);
+                File.WriteAllText(outputPath, convertedContents);
+                errorMessage = null;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                errorMessage = "Failed to write converted file: " + ex.Message;
+                return false;
+            }
+        }
+
+        private bool TryConvertFile(string inputPath, string outputPath, ConversionOptions options, out string errorMessage)
+        {
+            string fileContents;
+            if (!TryReadInputFile(inputPath, out fileContents, out errorMessage))
+            {
+                return false;
+            }
+
+            return TryWriteConvertedFile(fileContents, outputPath, options, out errorMessage);
+        }
+
+        private string ConvertContents(string fileContents, ConversionOptions options)
+        {
             int terrainIndex = fileContents.IndexOf("<Item class=\"Terrain\"", StringComparison.Ordinal);
             if (terrainIndex != -1)
             {
@@ -172,12 +541,10 @@ namespace Roblox_Legacy_Place_Convertor
                 if (terrainEndIndex != -1)
                 {
                     fileContents = fileContents.Remove(terrainIndex, terrainEndIndex - terrainIndex + 7);
-
                 }
             }
 
-            //Convert TextSize to Legacy FontSize
-            if (ChangeTextSizeToFontSizeCheckbox.IsChecked == true)
+            if (options.ConvertTextSize)
             {
                 int[] FontSizes = new int[10] { 8, 9, 10, 11, 12, 14, 18, 24, 36, 48 };
                 Dictionary<int, int> converted = new Dictionary<int, int>();
@@ -192,13 +559,11 @@ namespace Roblox_Legacy_Place_Convertor
 
                 foreach (KeyValuePair<int, int> entry in converted)
                 {
-                    // do something with entry.Value or entry.Key
                     fileContents = fileContents.Replace("<float name=\"TextSize\">" + entry.Key.ToString() + "</float>", "<token name=\"FontSize\">" + Array.IndexOf(FontSizes, entry.Value).ToString() + "</token>");
                 }
             }
 
-            // Convert colors from Color3uint8 to BrickColor
-            if (ColorCheckbox.IsChecked == true)
+            if (options.IncludeColors)
             {
                 foreach (KeyValuePair<string, string> entry in color3uint8ToBrickColor)
                 {
@@ -206,8 +571,7 @@ namespace Roblox_Legacy_Place_Convertor
                 }
             }
 
-            //If Union data is turned off, removes union data
-            if (UnionCheckbox.IsChecked == false)
+            if (!options.IncludeUnionData)
             {
                 int unionIndex = fileContents.IndexOf("<Item class=\"NonReplicatedCSGDictionaryService\"", StringComparison.Ordinal);
                 if (unionIndex != -1)
@@ -225,12 +589,10 @@ namespace Roblox_Legacy_Place_Convertor
                 }
             }
 
-            //Script conversion, removes the weird CDATA stuff if your script is multiline.
-            if (ScriptConvertCheckbox.IsChecked == true)
+            if (options.ConvertScripts)
             {
                 fileContents = fileContents.Replace("<ProtectedString name=\"Source\"><![CDATA[", "<ProtectedString name=\"Source\">");
                 fileContents = fileContents.Replace("]]></ProtectedString>", "</ProtectedString>");
-                //Change stuff like quotes to a format old roblox places support
                 int scriptStartIndex = fileContents.IndexOf("<ProtectedString name=\"Source\">", StringComparison.Ordinal);
                 while (scriptStartIndex != -1)
                 {
@@ -252,28 +614,61 @@ namespace Roblox_Legacy_Place_Convertor
                 }
             }
 
-            //Changes rbxassetid to longer link variant, fixes assets not loading in older clients
-            if (ChangeRbxassetidCheckbox.IsChecked == true)
+            if (options.ChangeRbxassetid)
             {
                 fileContents = fileContents.Replace("rbxassetid://", "http://www.roblox.com/asset/?id=");
             }
 
-            //Convert folders to models, since old Roblox clients don't support folders and therefore everything inside of folders isn't shown
-            if (ConvertFoldersCheckbox.IsChecked == true)
+            if (options.ConvertFolders)
             {
                 fileContents = fileContents.Replace("<Item class=\"Folder\"", "<Item class=\"Model\"");
             }
 
-            
+            return fileContents;
+        }
 
-            // Write fileContents string to the copy file
-            File.WriteAllText(newFilePath, fileContents);
-            // Done :D
-            ProgressBar.Value = 100;
-            ProgressLabel.Content = "Done!";
-            MessageBox.Show("Conversion done!", "Conversion status", MessageBoxButton.OK, MessageBoxImage.Information);
-            isConverting = false;
-            ConvertButton.IsEnabled = true;
+        private static bool IsSubdirectory(string parentPath, string childPath)
+        {
+            string parentFullPath = EnsureTrailingSeparator(Path.GetFullPath(parentPath));
+            string childFullPath = EnsureTrailingSeparator(Path.GetFullPath(childPath));
+            return childFullPath.StartsWith(parentFullPath, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string EnsureTrailingSeparator(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return path;
+            }
+
+            return path.EndsWith(Path.DirectorySeparatorChar.ToString()) ? path : path + Path.DirectorySeparatorChar;
+        }
+
+        private static string GetRelativePath(string rootPath, string fullPath)
+        {
+            var rootUri = new Uri(EnsureTrailingSeparator(Path.GetFullPath(rootPath)));
+            var fullUri = new Uri(Path.GetFullPath(fullPath));
+            string relativePath = Uri.UnescapeDataString(rootUri.MakeRelativeUri(fullUri).ToString());
+            return relativePath.Replace('/', Path.DirectorySeparatorChar);
+        }
+
+        private static string GetOutputExtension(string inputPath)
+        {
+            string extension = Path.GetExtension(inputPath);
+            string outputExtension;
+            return outputExtensionByInput.TryGetValue(extension, out outputExtension) ? outputExtension : null;
+        }
+
+        private static bool IsSupportedExtension(string inputPath)
+        {
+            return supportedExtensions.Contains(Path.GetExtension(inputPath));
+        }
+
+        private static List<string> DiscoverSupportedFiles(string inputRoot)
+        {
+            return Directory.EnumerateFiles(inputRoot, "*.*", SearchOption.AllDirectories)
+                .Where(IsSupportedExtension)
+                .ToList();
         }
     }
 }
