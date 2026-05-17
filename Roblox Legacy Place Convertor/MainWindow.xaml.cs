@@ -302,13 +302,13 @@ namespace Roblox_Legacy_Place_Convertor
                 return;
             }
 
-            Directory.CreateDirectory(outputFolderPath);
             List<string> files = DiscoverSupportedFiles(inputFolderPath);
             if (files.Count == 0)
             {
                 MessageBox.Show("No supported Roblox files were found in the selected folder.", "Nothing to convert", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
+            Directory.CreateDirectory(outputFolderPath);
 
             ProgressBar.Value = 0;
             ProgressLabel.Content = "";
@@ -490,7 +490,7 @@ namespace Roblox_Legacy_Place_Convertor
                 return false;
             }
 
-            if (fileContents.Contains("<roblox!"))
+            if (fileContents.IndexOf("<roblox!", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 errorMessage = "Please select a model or place in Roblox XML format.";
                 return false;
